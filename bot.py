@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import threading
+import asyncio
 import http.server
 import socketserver
 import json
+import time
 
 from telegram.ext import Application, CommandHandler
 
@@ -22,20 +24,16 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-def run_http_server(ready_event):
+def run_http_server():
+    """Запуск HTTP-сервера в главном потоке"""
     with socketserver.TCPServer(("0.0.0.0", 8080), HealthHandler) as httpd:
         logger.info("HTTP-сервер для health checks запущен на порту 8080")
-        ready_event.set()
         httpd.serve_forever()
 
-def main():
-    ready_event = threading.Event()
-    http_thread = threading.Thread(target=run_http_server, args=(ready_event,))
-    http_thread.daemon = True
-    http_thread.start()
-    
-    ready_event.wait()
-    logger.info("HTTP-сервер готов, запускаем Telegram бота...")
+def run_bot():
+    """Запуск Telegram бота в отдельном потоке с собственным event loop"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
@@ -48,6 +46,18 @@ def main():
     
     logger.info("Бот запущен и готов к работе...")
     app.run_polling()
+
+def main():
+    # Запускаем бота в фоновом потоке
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Небольшая пауза, чтобы бот успел инициализироваться
+    time.sleep(2)
+    
+    # Запускаем HTTP-сервер в главном потоке (он будет работать вечно)
+    run_http_server()
 
 if __name__ == "__main__":
     main()
